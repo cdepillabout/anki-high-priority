@@ -1,0 +1,89 @@
+-------------------------------
+!!!!!!!!!!!!WARNING!!!!!!!!!!!!
+!!This program modifies your !!
+!!deck, so there is always a !!
+!!possibility that it will   !!
+!!delete your deck. Please   !!
+!!make sure you have a backup!!
+!!of your deck before using  !!
+!!this program.              !!
+!!!!!!!!!!!!WARNING!!!!!!!!!!!!
+-------------------------------
+
+
+EXPLANATION
+===========
+
+This program will read in a list of words on stdin, search through your Anki
+decks for each word, and automatically add the "HighPriority" tag if the word
+is found.  Each word that is not found will be output to stdout.
+
+This program was made to make it easier to automatically use words from
+un-studied portions of existing decks, rather than having to input the words
+manually (and then having two instances of the word in two different decks).  
+
+This is very useful if, for instance, you are studying the Core10k Japanese 
+deck.  When reading a book or getting words from other sources, you can use 
+this program to automatically promote the words in the Core10k deck, rather 
+than inputting all of the words again in a new deck.
+
+For example, imagine you found the words 犬, 猿, 猫, and アオウミガメ in a 
+book.  You want to remember them, but you haven't gotten to them yet in your 
+Core10k deck. You can feed this program the file with these four words in it. 
+Let's see how this looks on the command line:
+
+$ cat inputfile
+犬
+猿
+猫
+アオウミガメ
+$
+
+You can see that our input file contains these three words.  Now let's run 
+anki-high-priority:
+
+$ anki-high-priority -i inputfile -o outputfile
+犬 was found in ['Core10k.anki']
+猿 was found in ['Core10k.anki']
+猫 was found in ['Core10k.anki']
+$
+
+You can see that 犬, 猿, and 猫 were found, so they were automatically given 
+the HighPriority tag.  Next time you run Anki, 犬, 猿, and 猫 will be the first 
+new cards that appear (as long as you don't have any other cards with the 
+HighPriority tag).  Now let's see what the output file looks like
+
+$ cat outputfile
+アオウミガメ
+$
+
+It contians アオウミガメ.  This was not found in our Core10k deck. (This is 
+because it is the name of a specific type of sea turtle).  You can then add 
+this word to Anki manually.
+
+
+INSTALLATION
+============
+
+This can be installed by either copying the script to somewhere on your path 
+directly, or using python's setuptools.
+
+Here is how to install using Python's setuptools:
+
+$ cd anki-high-priority/
+$ ls
+README  scripts  setup.cfg  setup.py
+$ python2 ./setup.py install --prefix=/some/path/
+....
+$
+
+The script will be installed to /some/path/bin/anki-high-priority.
+
+
+RC FILE
+=======
+
+anki-high-priority uses a config file in your HOME directory to know what decks 
+to look in, and what field to search for the words in.  When running for the 
+first time, anki-high-priority will create the rc file if it does not exist.  
+Please follow the instructions in the rc file to configure it for your decks.
