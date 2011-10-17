@@ -1,0 +1,306 @@
+#!/usr/bin/env python2
+# coding=utf-8
+
+"""
+This program will read in a list of words on stdin, search through your
+Anki decks for each word, and automatically add the "HighPriority" tag
+if the word is found.
+
+Each word that is not found will be output to stdout.
+"""
+
+import os, sys, imp, argparse, codecs
+
+import anki
+from anki.cards import Card
+from anki.facts import Fact
+
+# This is the template for the rcfile, if it doesn't exist.
+rcfile_template = """
+# This is the rcfile for the anki_high_priority program.
+# This file specifies the decks and field you want to use
+# to search for words that you already know. This file is
+# interpreted by the python interpreter, so please make sure
+# to use correct syntax.
+
+# decks_info is a list of tuples.  The first value in the tuple is the
+# deck name.  The second value in the tuple is the field name
+# that will be used to match the word against. This is interpreted as
+# valid python code, so please keep the syntax the same.
+# The syntax should be:
+#
+# decks_info = [ ("Deck name.anki", "fieldname"), ... ]
+#
+# The decks must be in your ~/.anki/decks/ directory.
+# Here is an example of what this should look like:
+#
+# decks_info = [
+#                 ("Core 2000 and 6000 Vocabulary and Sentences.anki", "Vocab"),
+#                 ("Core 10k.anki", "Japanse Word"),
+#                 ("Subs2srs.anki", "Unknown Word"),
+#             ]
+
+decks_info = [
+                ("", ""),
+                ("", ""),
+            ]
+"""
+
+# this is the query used to check if there are any facts that
+# match the word we are searching
+sql_word_query = 'select id from facts where id in (select factId from fields where value = :field_value and fieldModelId in (select id from fieldModels where name = :field_name))'
+
+def opendecks(decks_info):
+    """
+    Open all the decks that are listed at the top of the file in the
+    deck_names variable.  This will raise an exception if it can't
+    open one of the decks listed.
+
+    This returns a list of tuples.  The tuples are of the form
+    ("/path/to/deck", "fieldname", deckobject).
+    """
+    decks = []
+    current_name = ''
+
+    try:
+        for name, fieldname in decks_info:
+            current_name = name
+            d = anki.DeckStorage.Deck(name)
+            newinfo = (name, fieldname, d)
+            decks.append(newinfo)
+    except:
+        sys.stderr.write("ERROR! Caught exception while opening deck \"%s\"\n" % current_name)
+        sys.stderr.write("Trying to close all open decks...\n")
+        for _, _, d in decks:
+            d.close()
+        sys.stderr.write("All open decks closed.  Re-raising exception.\n")
+        raise
+
+    return decks
+
+def makefacthighpriority(deck, factid):
+    """
+    Adds the HighPriority tag to the fact with id factid in deck.
+    """
+    deck.addTags([factid], "HighPriority")
+    deck.reset()
+    fact = deck.s.query(Fact).get(factid)
+    fact.setModified(textChanged=True, deck=deck)
+    deck.setModified()
+
+def creatercfiletemp(rcfile):
+    """
+    Create a template rc file in the user's home directory.
+    The rcfile argument is the path to the rcfile to create.
+    """
+    f = open(rcfile, 'w')
+    f.write(rcfile_template)
+    f.close()
+
+def source_rcfile(rcfile):
+    """
+    This sources the rc file and returns the
+    'anki_high_priority_config' module.
+    """
+
+    # make sure the rc file exists, and create a template if it doesn't
+    if not os.path.isfile(rcfile):
+        try:
+            creatercfiletemp(rcfile)
+            sys.stderr.write("ERROR! RC file (%s) does not exist.\n" % rcfile)
+            sys.stderr.write("A template has been created for you.\n")
+            sys.stderr.write("Please edit the template and try running this program again.\n")
+        except:
+            sys.stderr.write("ERROR! RC file (%s) does not exist.\n" % rcfile)
+            sys.stderr.write("There was an error with creating it:\n")
+            raise
+        finally:
+            sys.exit(1)
+
+    # get the deck info from the config file
+    try:
+        config = imp.load_source('anki_high_priority_config', rcfile)
+    except:
+        sys.stderr.write("ERROR! Problem with loading the rc file (%s):\n" % rcfile)
+        raise
+
+    print("dir config = %s" % dir(config))
+
+    # make sure that the config file has the decks_info variable
+    if not hasattr(config, "decks_info"):
+        sys.stderr.write(
+                "ERROR! RC file (%s) does not have the 'decks_info' variable.\n" % rcfile)
+        sys.exit(1)
+
+    error_message = "ERROR! The 'decks_info' variable in the RC file\n"
+    error_message += "(%s)\n" % rcfile
+    error_message += "must be a list of tuples.  The tuples contain the deck name\n"
+    error_message += "(not the full path to the deck) and the field name that will\n"
+    error_message += "be searched against.\n"
+
+    # make sure that the decks_info variable is a list of tuples of strings
+    if type(config.decks_info) != list:
+        sys.stderr.write(error_message)
+        sys.exit(1)
+    if len(config.decks_info) < 1:
+        sys.stderr.write(error_message)
+        sys.exit(1)
+    for tup in config.decks_info:
+        if type(tup) != tuple:
+            sys.stderr.write(error_message)
+            sys.exit(1)
+        if len(tup) != 2:
+            sys.stderr.write(error_message)
+            sys.exit(1)
+        for string in tup:
+            if type(string) != str:
+                sys.stderr.write(error_message)
+                sys.exit(1)
+
+    return config
+
+def open_input_file(input_file):
+    """
+    Open the input word list file and return the file object.
+    If input_file is None, then we just return sys.stdin.
+    """
+    if input_file:
+        if not os.path.isfile(input_file):
+            sys.stderr.write(
+                    "ERROR! Input file (%s) is not a normal file.\n" % input_file)
+            sys.exit(1)
+        try:
+            return codecs.open(input_file, "r", "utf8")
+        except:
+            sys.stderr.write(
+                    "ERROR! Could not open input file (%s) for reading:\n" % input_file)
+            raise
+    else:
+        return sys.stdin
+
+def open_output_file(output_file):
+    """
+    Open the output word list file and return the file object.
+    If output_file is None, then we just return sys.stdout.
+    """
+    # open output file
+    if output_file:
+        try:
+            return codecs.open(output_file, "w", "utf8")
+        except:
+            sys.stderr.write(
+                    "ERROR! Could not open output file (%s) for writing:\n" % output_file)
+            raise
+    else:
+        return sys.stdout
+
+def main():
+
+    description = "Mark words in existing Anki decks with the \"HighPriority\" tag. "
+    epilog = "This program takes a list of words (INPUT_FILE) and checks if "
+    epilog += "each of them is already in one of your Anki decks.  If it is "
+    epilog += "already in a deck, then it will be marked as \"HighPriority\". "
+    epilog += "If it is not in a deck, then it will just be written to OUTPUT_FILE. "
+    epilog += "The input file can just be a file with one word on each line.  It "
+    epilog += "can also be a tab-seperated csv file (in which case only the word "
+    epilog += "in the first column will be checked)."
+    parser = argparse.ArgumentParser(description=description, epilog=epilog)
+    parser.add_argument('--input-file', '--input', '-i', action='store',
+            help="input word list (stdin by default)")
+    parser.add_argument('--output-file', '--output', '-o', action='store',
+            help="output word list (stdout by default)")
+    parser.add_argument('--quiet', '-q', action='store_true',
+            help="don't output found words to stderr")
+    args = parser.parse_args()
+
+    # open input file and output file
+    input_file = open_input_file(args.input_file)
+    output_file = open_output_file(args.output_file)
+
+    # important paths we will use later
+    homedir = os.path.expanduser("~")
+    decks_dir = os.path.expanduser("~/.anki/decks/")
+    rcfile = os.path.expanduser("~/.anki_high_priority_rc.py")
+
+
+    # make sure the decks_dir exists
+    if not os.path.isdir(decks_dir):
+        sys.stderr.write("ERROR! Anki decks directory does not exist (%s)!\n" % decks_dir)
+        sys.exit(1)
+
+    # source config file
+    config = source_rcfile(rcfile)
+
+    # change the deck names in decks_info to the real path
+    decks_info = [(os.path.join(decks_dir, deckname), fieldname)
+            for deckname, fieldname in config.decks_info]
+
+    # make sure all of the decks exist
+    for deckname, fieldname in decks_info:
+        if not os.path.isfile(deckname):
+            sys.stderr.write("ERROR! Deck \"%s\" does not exist.\n" % deckname)
+            sys.exit(1)
+
+
+
+    # read the input word list from the input file
+    input_word_list = input_file.readlines()
+    temp_word_list = []
+    i = 0
+    for line in input_word_list:
+        i += 1
+        if len(line) < 1 or line == "\n" or line[0] == '#':
+            tup = (None, line.rstrip('\n'), i, True) # the True means to skip this line
+            temp_word_list.append(tup)
+            continue
+        word = line.split('\t')[0]
+        if not word:
+            sys.stderr.write(
+                    "ERROR! No word in the first column of the input file on line %d.\n" % i)
+            sys.exit(1)
+        # the False means not to skip this line when looking the words up in the decks
+        tup = (word.rstrip('\n'), line.rstrip('\n'), i, False)
+        temp_word_list.append(tup)
+    input_word_list = temp_word_list
+
+    # open the decks
+    decks = opendecks(decks_info)
+
+    try:
+        # make sure the deck has a field that matches the field name we are searching for
+        for deckname, fieldname, d in decks:
+            if fieldname not in d.allFields():
+                sys.stderr.write("ERROR! Deck \"%s\" does not have the field \"%s\".\n" %
+                        (deckname, fieldname))
+                sys.exit(1)
+
+        # go through all of the words and find out if they are in each deck
+        for w, line, _, skip in input_word_list:
+            # we have to write out all lines that we skipped
+            if skip:
+                output_file.write(line)
+                output_file.write("\n")
+                continue
+            found = []
+            for deckname, fieldname, d in decks:
+                factlist = d.s.column0(sql_word_query,
+                        field_value=w, field_name=fieldname)
+                if factlist:
+                    found.append(os.path.basename(deckname))
+                for factid in factlist:
+                    makefacthighpriority(d, factid)
+            if found and not args.quiet:
+                sys.stderr.write("%s was found in %s\n" % (w, found))
+            if not found:
+                output_file.write(line)
+                output_file.write("\n")
+    finally:
+        for _, _, d in decks:
+            d.save()
+            d.close()
+
+
+
+if __name__ == '__main__':
+    main()
+
