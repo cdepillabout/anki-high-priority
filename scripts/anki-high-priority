@@ -213,6 +213,13 @@ def main():
             help="don't output found words to stderr")
     args = parser.parse_args()
 
+    # make sure input file and output file are not the same
+    if args.input_file == args.output_file:
+        sys.stderr.write("ERROR! input file (%s) should not be the same as output file (%s)\n"
+                % (args.input_file, args.output_file))
+        sys.exit(1)
+
+
     # open input file and output file
     input_file = open_input_file(args.input_file)
     output_file = open_output_file(args.output_file)
